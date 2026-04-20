@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polski Sprint · Polnisch Vokabeltrainer</title>
+  <meta name="description" content="Polnisch-Vokabeltrainer mit 1000 Wörtern, 10 Leveln, Smalltalk- und Business-Fokus, Streaks und Belohnungen.">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="background-glow glow-a"></div>
+  <div class="background-glow glow-b"></div>
+
+  <div class="app-shell">
+    <header class="hero panel">
+      <div class="hero-copy">
+        <span class="eyebrow">1000 Vokabeln · 10 Level · GitHub-Pages-ready</span>
+        <h1>Polski Sprint</h1>
+        <p class="hero-text">
+          Ein schneller Polnisch-Vokabeltrainer von A1 bis B2 – mit Fokus auf Smalltalk, Business, Mitarbeitendenkontakt
+          und Verkauf. Du siehst das deutsche Wort oder die deutsche Phrase und tippst die polnische Übersetzung.
+        </p>
+        <div class="hero-note">
+          <span>✓ Richtige Antworten verschwinden in der aktuellen Runde</span>
+          <span>✓ Falsche bleiben im Pool und kommen später wieder</span>
+          <span>✓ Normale Buchstaben reichen – polnische Sonderzeichen sind optional</span>
+        </div>
+      </div>
+
+      <div class="hero-stats-grid">
+        <article class="stat-card">
+          <div class="stat-label">Aktuelle 10er-Streak</div>
+          <div class="stat-value" id="streakValue">0</div>
+          <div class="stat-sub" id="streakSub">Heute 0/10</div>
+        </article>
+
+        <article class="stat-card">
+          <div class="stat-label">Heute richtig</div>
+          <div class="stat-value" id="todayValue">0</div>
+          <div class="stat-sub" id="todaySub">Noch 10 bis zum Pokal</div>
+        </article>
+
+        <article class="stat-card">
+          <div class="stat-label">Bester Lauf</div>
+          <div class="stat-value" id="bestComboValue">0</div>
+          <div class="stat-sub">Richtige Antworten am Stück</div>
+        </article>
+
+        <article class="stat-card">
+          <div class="stat-label">Gemeisterte Level</div>
+          <div class="stat-value" id="masteredLevelsValue">0/10</div>
+          <div class="stat-sub">Level komplett geschafft</div>
+        </article>
+      </div>
+    </header>
+
+    <main>
+      <section id="menuView" class="view view-active">
+        <section class="panel section-panel">
+          <div class="section-top">
+            <div>
+              <h2>Startmenü</h2>
+              <p>Wähle ein Level oder trainiere gezielt nach Thema.</p>
+            </div>
+            <div class="top-actions">
+              <button id="resetProgressBtn" class="ghost-button" type="button">Fortschritt zurücksetzen</button>
+            </div>
+          </div>
+
+          <div class="achievement-row" id="achievementShelf"></div>
+        </section>
+
+        <section class="panel section-panel">
+          <div class="section-top">
+            <div>
+              <h2>Level 1–10</h2>
+              <p>Jeweils 100 Vokabeln. Wenn du alle in einer Runde korrekt abräumst, gilt das Level als gemeistert.</p>
+            </div>
+          </div>
+          <div id="levelGrid" class="card-grid"></div>
+        </section>
+
+        <section class="panel section-panel">
+          <div class="section-top">
+            <div>
+              <h2>Themenbereiche</h2>
+              <p>Business, Adverben, Bewegungsverben und Smalltalk – schnell trainieren nach Kontext.</p>
+            </div>
+          </div>
+          <div id="themeGrid" class="card-grid theme-grid"></div>
+        </section>
+      </section>
+
+      <section id="trainerView" class="view">
+        <div class="trainer-header panel">
+          <div class="trainer-header-left">
+            <button id="backToMenuBtn" class="ghost-button" type="button">← Zurück ins Menü</button>
+            <div>
+              <div class="eyebrow">Aktive Runde</div>
+              <h2 id="sessionModeTitle">Level</h2>
+            </div>
+          </div>
+          <div class="trainer-mini-stats">
+            <div class="mini-stat">
+              <span class="mini-label">Noch offen</span>
+              <strong id="sessionRemainingMini">0</strong>
+            </div>
+            <div class="mini-stat">
+              <span class="mini-label">Combo</span>
+              <strong id="sessionComboMini">0</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="trainer-layout">
+          <section class="panel question-panel">
+            <div class="question-meta">
+              <span class="pill" id="sessionLevelPill">Level</span>
+              <span class="pill soft" id="sessionCountPill">Noch 0</span>
+            </div>
+
+            <div id="questionCard" class="question-card">
+              <div class="question-label">Deutsch</div>
+              <div class="question-word" id="germanWord">Bereit?</div>
+
+              <form id="answerForm" autocomplete="off">
+                <label class="input-label" for="answerInput">Polnisch</label>
+                <div class="input-row">
+                  <input id="answerInput" type="text" placeholder="Hier deine Antwort eingeben ..." spellcheck="false" autocomplete="off">
+                  <button id="submitBtn" class="primary-button" type="submit">Prüfen</button>
+                </div>
+              </form>
+
+              <p class="input-help">Tipp: Du darfst ganz normal tippen – z. B. "zolty" statt "żółty".</p>
+
+              <div id="feedbackBox" class="feedback hidden" aria-live="polite"></div>
+            </div>
+          </section>
+
+          <aside class="sidebar-stack">
+            <section class="panel sidebar-panel">
+              <h3>Runden-Statistik</h3>
+              <div class="sidebar-stat-grid">
+                <article class="small-stat">
+                  <span class="small-stat-label">Richtig</span>
+                  <strong id="sessionCorrectValue">0</strong>
+                </article>
+                <article class="small-stat">
+                  <span class="small-stat-label">Falsch</span>
+                  <strong id="sessionWrongValue">0</strong>
+                </article>
+                <article class="small-stat">
+                  <span class="small-stat-label">Aktuelle Serie</span>
+                  <strong id="sessionComboValue">0</strong>
+                </article>
+                <article class="small-stat">
+                  <span class="small-stat-label">Bester Lauf</span>
+                  <strong id="sessionBestComboValue">0</strong>
+                </article>
+              </div>
+            </section>
+
+            <section class="panel sidebar-panel">
+              <h3>Belohnungen</h3>
+              <div id="sessionAchievementShelf" class="achievement-row compact"></div>
+
+              <div class="goal-box">
+                <div class="goal-top">
+                  <span>Heutiges Pokalziel</span>
+                  <strong id="dailyGoalText">0 / 10</strong>
+                </div>
+                <div class="meter">
+                  <div class="meter-fill" id="dailyGoalFill"></div>
+                </div>
+                <p id="dailyGoalSub" class="goal-sub">Noch 10 richtige Antworten bis zum Tagespokal.</p>
+              </div>
+            </section>
+
+            <section class="panel sidebar-panel">
+              <h3>So funktioniert die Runde</h3>
+              <ul class="rule-list">
+                <li>Richtig beantwortete Wörter verschwinden aus der aktuellen Runde.</li>
+                <li>Falsch beantwortete Wörter bleiben im Pool und tauchen zufällig wieder auf.</li>
+                <li>Bei 5, 10 und 20 richtigen Antworten in Folge gibt es Sterne.</li>
+                <li>Bei 10 richtigen Antworten an einem Tag gibt es einen Pokal.</li>
+              </ul>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="completionModal" class="modal hidden" aria-hidden="true">
+    <div class="modal-card panel">
+      <div class="eyebrow">Geschafft</div>
+      <h2 id="completionTitle">Level gemeistert</h2>
+      <p id="completionText"></p>
+      <div id="completionBadges" class="achievement-row compact"></div>
+      <div class="modal-actions">
+        <button id="restartModeBtn" class="primary-button" type="button">Gleichen Modus nochmal</button>
+        <button id="closeModalBtn" class="ghost-button" type="button">Zurück ins Menü</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="vocab-data.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
