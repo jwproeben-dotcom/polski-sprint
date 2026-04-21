@@ -370,6 +370,11 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.trainer-actions {
+  flex: 0 1 auto;
 }
 
 .primary-button,

@@ -2,6 +2,7 @@
   const STORAGE_KEY = "polski-sprint-state-v1";
   const MILESTONES = [5, 10, 20];
   const DAILY_GOAL = 10;
+  const FEEDBACK_DELAY_MS = 2200;
   const APP_DATA = window.APP_DATA || {};
   const LEVELS = APP_DATA.levels || [];
   const THEMES = APP_DATA.themes || [];
@@ -22,6 +23,7 @@
     masteredLevelsValue: document.getElementById("masteredLevelsValue"),
     resetProgressBtn: document.getElementById("resetProgressBtn"),
     backToMenuBtn: document.getElementById("backToMenuBtn"),
+    restartCurrentModeBtn: document.getElementById("restartCurrentModeBtn"),
     sessionModeTitle: document.getElementById("sessionModeTitle"),
     sessionRemainingMini: document.getElementById("sessionRemainingMini"),
     sessionComboMini: document.getElementById("sessionComboMini"),
@@ -60,7 +62,8 @@
       bestComboEver: 0,
       totalCorrectEver: 0,
       totalWrongEver: 0,
-      dailyProgress: {}
+      dailyProgress: {},
+      modeProgress: {}
     };
   }
 
@@ -80,22 +83,44 @@
 
   function sanitizeState(candidate) {
     const safe = createDefaultState();
-    safe.masteredWordIds = Array.isArray(candidate.masteredWordIds)
-      ? [...new Set(candidate.masteredWordIds.map(Number).filter((id) => WORD_MAP.has(id)))]
-      : [];
-    safe.completedLevels = Array.isArray(candidate.completedLevels)
-      ? [...new Set(candidate.completedLevels.map(Number).filter((level) => LEVELS.some((entry) => entry.level === level)))]
-      : [];
-    safe.bestComboEver = Number.isFinite(candidate.bestComboEver) ? Math.max(0, candidate.bestComboEver) : 0;
-    safe.totalCorrectEver = Number.isFinite(candidate.totalCorrectEver) ? Math.max(0, candidate.totalCorrectEver) : 0;
-    safe.totalWrongEver = Number.isFinite(candidate.totalWrongEver) ? Math.max(0, candidate.totalWrongEver) : 0;
+    const source = candidate && typeof candidate === "object" ? candidate : {};
 
-    const dailyProgress = candidate.dailyProgress && typeof candidate.dailyProgress === "object" ? candidate.dailyProgress : {};
+    safe.masteredWordIds = Array.isArray(source.masteredWordIds)
+      ? [...new Set(source.masteredWordIds.map(Number).filter((id) => WORD_MAP.has(id)))]
+      : [];
+    safe.completedLevels = Array.isArray(source.completedLevels)
+      ? [...new Set(source.completedLevels.map(Number).filter((level) => LEVELS.some((entry) => entry.level === level)))]
+      : [];
+    safe.bestComboEver = Number.isFinite(Number(source.bestComboEver)) ? Math.max(0, Number(source.bestComboEver)) : 0;
+    safe.totalCorrectEver = Number.isFinite(Number(source.totalCorrectEver)) ? Math.max(0, Number(source.totalCorrectEver)) : 0;
+    safe.totalWrongEver = Number.isFinite(Number(source.totalWrongEver)) ? Math.max(0, Number(source.totalWrongEver)) : 0;
+
+    const dailyProgress = source.dailyProgress && typeof source.dailyProgress === "object" ? source.dailyProgress : {};
     Object.entries(dailyProgress).forEach(([dateKey, value]) => {
       const correctWordIds = value && Array.isArray(value.correctWordIds)
         ? [...new Set(value.correctWordIds.map(Number).filter((id) => WORD_MAP.has(id)))]
         : [];
       safe.dailyProgress[dateKey] = { correctWordIds };
+    });
+
+    const modeProgress = source.modeProgress && typeof source.modeProgress === "object" ? source.modeProgress : {};
+    Object.entries(modeProgress).forEach(([sessionKey, value]) => {
+      const entry = value && typeof value === "object" ? value : {};
+      const remainingIds = Array.isArray(entry.remainingIds)
+        ? [...new Set(entry.remainingIds.map(Number).filter((id) => WORD_MAP.has(id)))]
+        : [];
+      const currentWordId = Number.isFinite(Number(entry.currentWordId)) && remainingIds.includes(Number(entry.currentWordId))
+        ? Number(entry.currentWordId)
+        : null;
+
+      safe.modeProgress[sessionKey] = {
+        remainingIds,
+        currentWordId,
+        correct: Number.isFinite(Number(entry.correct)) ? Math.max(0, Number(entry.correct)) : 0,
+        wrong: Number.isFinite(Number(entry.wrong)) ? Math.max(0, Number(entry.wrong)) : 0,
+        combo: Number.isFinite(Number(entry.combo)) ? Math.max(0, Number(entry.combo)) : 0,
+        bestCombo: Number.isFinite(Number(entry.bestCombo)) ? Math.max(0, Number(entry.bestCombo)) : 0
+      };
     });
 
     return safe;
@@ -115,6 +140,97 @@
 
   function getScopeWords(modeType, modeId) {
     return modeType === "level" ? getWordsByLevel(Number(modeId)) : getWordsByTheme(modeId);
+  }
+
+  function getSessionKey(modeType, modeId) {
+    return `${modeType}:${modeId}`;
+  }
+
+  function getSavedModeProgress(modeType, modeId) {
+    return state.modeProgress[getSessionKey(modeType, modeId)] || null;
+  }
+
+  function clearSavedModeProgress(modeType, modeId) {
+    delete state.modeProgress[getSessionKey(modeType, modeId)];
+  }
+
+  function getNextWordIdFromPool(remainingIds, excludeId = null) {
+    if (!Array.isArray(remainingIds) || !remainingIds.length) {
+      return null;
+    }
+
+    const pool = remainingIds.filter((id) => remainingIds.length === 1 || id !== excludeId);
+    const effectivePool = pool.length ? pool : remainingIds;
+    return effectivePool[Math.floor(Math.random() * effectivePool.length)];
+  }
+
+  function buildSessionSnapshot() {
+    if (!session) {
+      return null;
+    }
+
+    const remainingIds = [...session.remainingIds];
+    let currentWordId = session.currentWordId;
+
+    if (session.awaitingNext) {
+      if (session.pendingCompletion || !remainingIds.length) {
+        currentWordId = null;
+      } else {
+        currentWordId = getNextWordIdFromPool(remainingIds, session.nextExcludeId);
+      }
+    }
+
+    if (!remainingIds.includes(currentWordId)) {
+      currentWordId = getNextWordIdFromPool(remainingIds);
+    }
+
+    return {
+      remainingIds,
+      currentWordId,
+      correct: session.correct,
+      wrong: session.wrong,
+      combo: session.combo,
+      bestCombo: session.bestCombo
+    };
+  }
+
+  function syncModeProgressWithSession() {
+    if (!session) {
+      return;
+    }
+
+    const key = getSessionKey(session.modeType, session.modeId);
+
+    if (!session.remainingIds.length || session.pendingCompletion) {
+      delete state.modeProgress[key];
+      return;
+    }
+
+    const snapshot = buildSessionSnapshot();
+    if (!snapshot || !snapshot.remainingIds.length) {
+      delete state.modeProgress[key];
+      return;
+    }
+
+    state.modeProgress[key] = snapshot;
+  }
+
+  function focusAnswerInput() {
+    if (!session || dom.answerInput.disabled) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      if (!session || dom.answerInput.disabled) {
+        return;
+      }
+
+      dom.answerInput.focus({ preventScroll: true });
+      const currentValue = dom.answerInput.value;
+      if (typeof dom.answerInput.setSelectionRange === "function") {
+        dom.answerInput.setSelectionRange(currentValue.length, currentValue.length);
+      }
+    });
   }
 
   function getTodayKey() {
@@ -272,6 +388,10 @@
       const masteredCount = countMasteredWords(words);
       const progressPercent = Math.round((masteredCount / words.length) * 100);
       const isCompleted = state.completedLevels.includes(level.level);
+      const savedRound = getSavedModeProgress("level", level.level);
+      const hasSavedRound = Boolean(savedRound && savedRound.remainingIds.length && savedRound.remainingIds.length < words.length);
+      const roundSolvedCount = hasSavedRound ? words.length - savedRound.remainingIds.length : 0;
+
       return `
         <button class="mode-card ${isCompleted ? "is-mastered" : ""}" type="button" data-mode="level" data-id="${level.level}">
           <div class="card-topline">
@@ -279,7 +399,7 @@
               <div class="card-kicker">${level.title}</div>
               <h3 class="card-title">${level.name}</h3>
             </div>
-            <div class="tag ${isCompleted ? "success" : ""}">${isCompleted ? "Gemeistert" : "100 Wörter"}</div>
+            <div class="tag ${isCompleted ? "success" : ""}">${isCompleted ? "Gemeistert" : hasSavedRound ? "Fortsetzen" : "100 Wörter"}</div>
           </div>
           <p class="card-description">${level.description}</p>
           <div class="progress-meta">
@@ -291,7 +411,7 @@
           </div>
           <div class="card-footer">
             <span class="tag">${level.cefr}</span>
-            <span class="tag">${isCompleted ? "Komplett geschafft" : "Zum Starten klicken"}</span>
+            <span class="tag">${isCompleted ? "Komplett geschafft" : hasSavedRound ? `${roundSolvedCount}/${words.length} in Runde erledigt` : "Zum Starten klicken"}</span>
           </div>
         </button>
       `;
@@ -303,6 +423,10 @@
       const words = getWordsByTheme(theme.id);
       const masteredCount = countMasteredWords(words);
       const progressPercent = Math.round((masteredCount / words.length) * 100);
+      const savedRound = getSavedModeProgress("theme", theme.id);
+      const hasSavedRound = Boolean(savedRound && savedRound.remainingIds.length && savedRound.remainingIds.length < words.length);
+      const roundSolvedCount = hasSavedRound ? words.length - savedRound.remainingIds.length : 0;
+
       return `
         <button class="mode-card" type="button" data-mode="theme" data-id="${theme.id}">
           <div class="card-topline">
@@ -322,7 +446,7 @@
           </div>
           <div class="card-footer">
             <span class="tag">${words.length} Wörter</span>
-            <span class="tag">Zum Starten klicken</span>
+            <span class="tag">${hasSavedRound ? `${roundSolvedCount}/${words.length} in Runde erledigt` : "Zum Starten klicken"}</span>
           </div>
         </button>
       `;
@@ -353,7 +477,9 @@
     hideFeedback();
     hideCompletionModal();
 
-    session = {
+    const scopeIds = new Set(words.map((word) => word.id));
+    const savedProgress = getSavedModeProgress(modeType, modeId);
+    const freshSession = {
       modeType,
       modeId,
       words,
@@ -369,10 +495,39 @@
       nextExcludeId: null
     };
 
-    pickNextWord();
+    if (savedProgress) {
+      const remainingIds = savedProgress.remainingIds.filter((id) => scopeIds.has(id));
+      const solvedSomeWords = remainingIds.length > 0 && remainingIds.length < words.length;
+
+      if (solvedSomeWords) {
+        session = {
+          ...freshSession,
+          remainingIds,
+          currentWordId: remainingIds.includes(savedProgress.currentWordId) ? savedProgress.currentWordId : null,
+          correct: Math.max(0, Number(savedProgress.correct) || 0),
+          wrong: Math.max(0, Number(savedProgress.wrong) || 0),
+          combo: Math.max(0, Number(savedProgress.combo) || 0),
+          bestCombo: Math.max(0, Number(savedProgress.bestCombo) || 0, Number(savedProgress.combo) || 0)
+        };
+      } else {
+        clearSavedModeProgress(modeType, modeId);
+        session = freshSession;
+        saveState();
+      }
+    } else {
+      session = freshSession;
+    }
+
+    if (!session.currentWordId || !session.remainingIds.includes(session.currentWordId)) {
+      pickNextWord();
+    }
+
+    syncModeProgressWithSession();
+    saveState();
+
     switchView("trainer");
     renderSession();
-    dom.answerInput.focus();
+    focusAnswerInput();
   }
 
   function renderSession() {
@@ -394,6 +549,7 @@
     dom.sessionWrongValue.textContent = String(session.wrong);
     dom.sessionComboValue.textContent = String(session.combo);
     dom.sessionBestComboValue.textContent = String(session.bestCombo);
+    dom.restartCurrentModeBtn.textContent = session.modeType === "level" ? "Level neu starten" : "Thema neu starten";
 
     renderSessionAchievements();
     renderDailyGoalBox();
@@ -451,15 +607,18 @@
   function setInputState(waiting) {
     dom.answerInput.disabled = waiting;
     dom.submitBtn.textContent = waiting ? (session && session.pendingCompletion ? "Abschließen" : "Weiter") : "Prüfen";
+
+    if (!waiting) {
+      focusAnswerInput();
+    }
   }
 
   function pickNextWord(excludeId = null) {
     if (!session || !session.remainingIds.length) {
       return;
     }
-    const pool = session.remainingIds.filter((id) => session.remainingIds.length === 1 || id !== excludeId);
-    const effectivePool = pool.length ? pool : session.remainingIds;
-    const nextId = effectivePool[Math.floor(Math.random() * effectivePool.length)];
+
+    const nextId = getNextWordIdFromPool(session.remainingIds, excludeId);
     session.currentWordId = nextId;
   }
 
@@ -510,13 +669,18 @@
     }
 
     session.remainingIds = session.remainingIds.filter((id) => id !== word.id);
+    const shouldComplete = session.remainingIds.length === 0;
 
-    saveState();
-    renderMenu();
+    if (shouldComplete && session.modeType === "level" && !state.completedLevels.includes(Number(session.modeId))) {
+      state.completedLevels.push(Number(session.modeId));
+    }
 
     const answerPreview = escapeHtml(word.polish);
     showFeedback(true, `Richtig! <strong>${answerPreview}</strong>`);
-    prepareAdvance(word.id, session.remainingIds.length === 0);
+    prepareAdvance(word.id, shouldComplete);
+    syncModeProgressWithSession();
+    saveState();
+    renderMenu();
     renderSession();
   }
 
@@ -524,11 +688,12 @@
     session.wrong += 1;
     session.combo = 0;
     state.totalWrongEver += 1;
-    saveState();
 
     const answers = word.answers.map((answer) => escapeHtml(answer)).join(" · ");
     showFeedback(false, `Nicht ganz. Richtig ist: <strong>${answers}</strong>`);
     prepareAdvance(word.id, false);
+    syncModeProgressWithSession();
+    saveState();
     renderSession();
   }
 
@@ -555,7 +720,7 @@
     clearAdvanceTimer();
     advanceTimer = window.setTimeout(() => {
       advanceAfterFeedback();
-    }, 1200);
+    }, FEEDBACK_DELAY_MS);
   }
 
   function clearAdvanceTimer() {
@@ -582,9 +747,11 @@
     hideFeedback();
     dom.answerInput.value = "";
     pickNextWord(session.nextExcludeId);
+    syncModeProgressWithSession();
+    saveState();
     setInputState(false);
     renderSession();
-    dom.answerInput.focus();
+    focusAnswerInput();
   }
 
   function completeSession() {
@@ -594,6 +761,7 @@
       state.completedLevels.push(Number(session.modeId));
     }
 
+    clearSavedModeProgress(session.modeType, session.modeId);
     saveState();
     renderMenu();
 
@@ -645,6 +813,11 @@
   }
 
   function returnToMenu() {
+    if (session) {
+      syncModeProgressWithSession();
+      saveState();
+    }
+
     clearAdvanceTimer();
     hideFeedback();
     hideCompletionModal();
@@ -687,8 +860,20 @@
     });
 
     dom.answerForm.addEventListener("submit", handleAnswerSubmit);
+    dom.submitBtn.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+    });
     dom.resetProgressBtn.addEventListener("click", resetProgress);
     dom.backToMenuBtn.addEventListener("click", returnToMenu);
+    dom.restartCurrentModeBtn.addEventListener("click", () => {
+      if (!session) {
+        return;
+      }
+
+      clearSavedModeProgress(session.modeType, session.modeId);
+      saveState();
+      startSession(session.modeType, session.modeId);
+    });
 
     dom.restartModeBtn.addEventListener("click", () => {
       if (!session) {
@@ -697,6 +882,8 @@
       }
       const modeType = session.modeType;
       const modeId = session.modeId;
+      clearSavedModeProgress(modeType, modeId);
+      saveState();
       startSession(modeType, modeId);
     });
 
