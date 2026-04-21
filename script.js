@@ -103,7 +103,11 @@
       safe.dailyProgress[dateKey] = { correctWordIds };
     });
 
-    const modeProgress = source.modeProgress && typeof source.modeProgress === "object" ? source.modeProgress : {};
+    const modeProgressSource = source.modeProgress && typeof source.modeProgress === "object"
+      ? source.modeProgress
+      : (source.savedSessions && typeof source.savedSessions === "object" ? source.savedSessions : {});
+
+    const modeProgress = modeProgressSource;
     Object.entries(modeProgress).forEach(([sessionKey, value]) => {
       const entry = value && typeof value === "object" ? value : {};
       const remainingIds = Array.isArray(entry.remainingIds)
@@ -215,22 +219,35 @@
     state.modeProgress[key] = snapshot;
   }
 
-  function focusAnswerInput() {
-    if (!session || dom.answerInput.disabled) {
+  function focusAnswerInput(options = {}) {
+    const { immediate = false } = options;
+
+    if (!session) {
       return;
     }
 
-    window.requestAnimationFrame(() => {
-      if (!session || dom.answerInput.disabled) {
+    const applyFocus = () => {
+      if (!session || !dom.trainerView.classList.contains("view-active")) {
         return;
       }
 
-      dom.answerInput.focus({ preventScroll: true });
+      try {
+        dom.answerInput.focus({ preventScroll: true });
+      } catch (error) {
+        dom.answerInput.focus();
+      }
+
       const currentValue = dom.answerInput.value;
       if (typeof dom.answerInput.setSelectionRange === "function") {
         dom.answerInput.setSelectionRange(currentValue.length, currentValue.length);
       }
-    });
+    };
+
+    if (immediate) {
+      applyFocus();
+    }
+
+    window.requestAnimationFrame(applyFocus);
   }
 
   function getTodayKey() {
@@ -527,7 +544,7 @@
 
     switchView("trainer");
     renderSession();
-    focusAnswerInput();
+    focusAnswerInput({ immediate: true });
   }
 
   function renderSession() {
@@ -605,10 +622,15 @@
   }
 
   function setInputState(waiting) {
-    dom.answerInput.disabled = waiting;
+    dom.answerInput.disabled = false;
+    dom.answerInput.classList.toggle("is-locked", waiting);
+    dom.answerInput.setAttribute("aria-disabled", waiting ? "true" : "false");
+    dom.answerInput.setAttribute("aria-busy", waiting ? "true" : "false");
     dom.submitBtn.textContent = waiting ? (session && session.pendingCompletion ? "Abschließen" : "Weiter") : "Prüfen";
 
-    if (!waiting) {
+    if (waiting) {
+      focusAnswerInput({ immediate: true });
+    } else {
       focusAnswerInput();
     }
   }
@@ -860,9 +882,39 @@
     });
 
     dom.answerForm.addEventListener("submit", handleAnswerSubmit);
-    dom.submitBtn.addEventListener("mousedown", (event) => {
+
+    const keepKeyboardOpen = (event) => {
+      event.preventDefault();
+      focusAnswerInput({ immediate: true });
+    };
+
+    dom.submitBtn.addEventListener("pointerdown", keepKeyboardOpen);
+    dom.submitBtn.addEventListener("mousedown", keepKeyboardOpen);
+
+    dom.answerInput.addEventListener("beforeinput", (event) => {
+      if (session && session.awaitingNext) {
+        event.preventDefault();
+      }
+    });
+
+    dom.answerInput.addEventListener("keydown", (event) => {
+      if (!session || !session.awaitingNext) {
+        return;
+      }
+
+      if (["Enter", "Tab", "Escape"].includes(event.key)) {
+        return;
+      }
+
       event.preventDefault();
     });
+
+    dom.answerInput.addEventListener("paste", (event) => {
+      if (session && session.awaitingNext) {
+        event.preventDefault();
+      }
+    });
+
     dom.resetProgressBtn.addEventListener("click", resetProgress);
     dom.backToMenuBtn.addEventListener("click", returnToMenu);
     dom.restartCurrentModeBtn.addEventListener("click", () => {
