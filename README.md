@@ -52,9 +52,3 @@ Fertige Browser-App für GitHub Pages: ein Polnisch-Vokabeltrainer mit 1000 Voka
 ## Tipp
 
 Wenn du später Vokabeln austauschen willst, musst du nur die Datei `vocab-data.js` ändern.
-
-
-## Neu im letzten Update
-
-- Mobile-Tastatur bleibt jetzt zwischen zwei Fragen aktiv, damit du bei der nächsten Frage direkt weiterschreiben kannst.
-- Die Eingabe bleibt aktiv, ohne dass du erneut in das Feld tippen musst.

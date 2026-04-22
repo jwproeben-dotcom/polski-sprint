@@ -3,11 +3,42 @@
   const MILESTONES = [5, 10, 20];
   const DAILY_GOAL = 10;
   const FEEDBACK_DELAY_MS = 2200;
+  const MAX_RECENT_RESULTS = 180;
+  const STAGE_LABELS = ["A1", "A2", "B1", "B2"];
+  const READINESS_THRESHOLDS = [0.50, 0.54, 0.57, 0.60];
+  const MIN_COVERAGE_THRESHOLDS = [0.28, 0.26, 0.22, 0.20];
+  const COARSE_CEFR_MAP = {
+    "A1": "A1",
+    "A1/A2": "A1",
+    "A2": "A2",
+    "A2/B1": "A2",
+    "B1": "B1",
+    "B1/B2": "B1",
+    "B2": "B2"
+  };
+  const CEFR_DIFFICULTY_MAP = {
+    "A1": 0.85,
+    "A1/A2": 1.15,
+    "A2": 1.45,
+    "A2/B1": 1.75,
+    "B1": 2.05,
+    "B1/B2": 2.35,
+    "B2": 2.85
+  };
+
   const APP_DATA = window.APP_DATA || {};
   const LEVELS = APP_DATA.levels || [];
   const THEMES = APP_DATA.themes || [];
   const VOCABULARY = APP_DATA.vocabulary || [];
   const WORD_MAP = new Map(VOCABULARY.map((word) => [word.id, word]));
+  const WORDS_BY_STAGE = STAGE_LABELS.reduce((accumulator, stageLabel) => {
+    accumulator[stageLabel] = VOCABULARY.filter((word) => getCoarseCefrLabel(word.cefr) === stageLabel);
+    return accumulator;
+  }, {});
+  const LEVELS_BY_STAGE = STAGE_LABELS.reduce((accumulator, stageLabel) => {
+    accumulator[stageLabel] = LEVELS.filter((level) => getCoarseCefrLabel(level.cefr) === stageLabel);
+    return accumulator;
+  }, {});
 
   const dom = {
     menuView: document.getElementById("menuView"),
@@ -21,6 +52,14 @@
     todaySub: document.getElementById("todaySub"),
     bestComboValue: document.getElementById("bestComboValue"),
     masteredLevelsValue: document.getElementById("masteredLevelsValue"),
+    cefrCurrentLabel: document.getElementById("cefrCurrentLabel"),
+    cefrScoreValue: document.getElementById("cefrScoreValue"),
+    cefrTrendText: document.getElementById("cefrTrendText"),
+    cefrMeterFill: document.getElementById("cefrMeterFill"),
+    cefrDescription: document.getElementById("cefrDescription"),
+    levelMetricAccuracy: document.getElementById("levelMetricAccuracy"),
+    levelMetricConsistency: document.getElementById("levelMetricConsistency"),
+    levelMetricDifficulty: document.getElementById("levelMetricDifficulty"),
     resetProgressBtn: document.getElementById("resetProgressBtn"),
     backToMenuBtn: document.getElementById("backToMenuBtn"),
     restartCurrentModeBtn: document.getElementById("restartCurrentModeBtn"),
@@ -63,7 +102,9 @@
       totalCorrectEver: 0,
       totalWrongEver: 0,
       dailyProgress: {},
-      modeProgress: {}
+      modeProgress: {},
+      wordStats: {},
+      recentResults: []
     };
   }
 
@@ -107,8 +148,7 @@
       ? source.modeProgress
       : (source.savedSessions && typeof source.savedSessions === "object" ? source.savedSessions : {});
 
-    const modeProgress = modeProgressSource;
-    Object.entries(modeProgress).forEach(([sessionKey, value]) => {
+    Object.entries(modeProgressSource).forEach(([sessionKey, value]) => {
       const entry = value && typeof value === "object" ? value : {};
       const remainingIds = Array.isArray(entry.remainingIds)
         ? [...new Set(entry.remainingIds.map(Number).filter((id) => WORD_MAP.has(id)))]
@@ -127,11 +167,69 @@
       };
     });
 
+    const wordStatsSource = source.wordStats && typeof source.wordStats === "object" ? source.wordStats : {};
+    Object.entries(wordStatsSource).forEach(([wordId, value]) => {
+      const numericId = Number(wordId);
+      if (!WORD_MAP.has(numericId)) {
+        return;
+      }
+      safe.wordStats[numericId] = sanitizeWordStatEntry(value);
+    });
+
+    const recentResultsSource = Array.isArray(source.recentResults) ? source.recentResults : [];
+    safe.recentResults = recentResultsSource
+      .map(sanitizeRecentResultEntry)
+      .filter(Boolean)
+      .slice(0, MAX_RECENT_RESULTS);
+
     return safe;
+  }
+
+  function sanitizeWordStatEntry(value) {
+    const entry = value && typeof value === "object" ? value : {};
+    return {
+      seen: Number.isFinite(Number(entry.seen)) ? Math.max(0, Number(entry.seen)) : 0,
+      correct: Number.isFinite(Number(entry.correct)) ? Math.max(0, Number(entry.correct)) : 0,
+      wrong: Number.isFinite(Number(entry.wrong)) ? Math.max(0, Number(entry.wrong)) : 0,
+      currentStreak: Number.isFinite(Number(entry.currentStreak)) ? Math.max(0, Number(entry.currentStreak)) : 0,
+      bestStreak: Number.isFinite(Number(entry.bestStreak)) ? Math.max(0, Number(entry.bestStreak)) : 0,
+      lastSeenAt: Number.isFinite(Number(entry.lastSeenAt)) ? Number(entry.lastSeenAt) : null,
+      lastCorrectAt: Number.isFinite(Number(entry.lastCorrectAt)) ? Number(entry.lastCorrectAt) : null,
+      lastResult: entry.lastResult === "correct" || entry.lastResult === "wrong" ? entry.lastResult : null
+    };
+  }
+
+  function sanitizeRecentResultEntry(value) {
+    const entry = value && typeof value === "object" ? value : {};
+    const wordId = Number(entry.id);
+    if (!WORD_MAP.has(wordId)) {
+      return null;
+    }
+
+    return {
+      id: wordId,
+      correct: Boolean(entry.correct),
+      timestamp: Number.isFinite(Number(entry.timestamp)) ? Number(entry.timestamp) : Date.now(),
+      responseMs: Number.isFinite(Number(entry.responseMs)) ? clamp(Number(entry.responseMs), 0, 90000) : null,
+      answerLength: Number.isFinite(Number(entry.answerLength)) ? Math.max(1, Number(entry.answerLength)) : null,
+      cefr: typeof entry.cefr === "string" && entry.cefr ? entry.cefr : (WORD_MAP.get(wordId) ? WORD_MAP.get(wordId).cefr : "A1")
+    };
   }
 
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function getCoarseCefrLabel(tag) {
+    return COARSE_CEFR_MAP[tag] || "A1";
+  }
+
+  function getDifficultyValue(tag) {
+    return CEFR_DIFFICULTY_MAP[tag] || CEFR_DIFFICULTY_MAP.A1;
   }
 
   function getWordsByLevel(levelNumber) {
@@ -250,6 +348,12 @@
     window.requestAnimationFrame(applyFocus);
   }
 
+  function stampQuestionShown() {
+    if (session) {
+      session.questionShownAt = Date.now();
+    }
+  }
+
   function getTodayKey() {
     return new Intl.DateTimeFormat("en-CA", {
       timeZone: "Europe/Berlin",
@@ -336,8 +440,271 @@
       .replace(/'/g, "&#39;");
   }
 
-  function renderMenu() {
+  function getWordStatsEntry(wordId) {
+    if (!state.wordStats[wordId]) {
+      state.wordStats[wordId] = {
+        seen: 0,
+        correct: 0,
+        wrong: 0,
+        currentStreak: 0,
+        bestStreak: 0,
+        lastSeenAt: null,
+        lastCorrectAt: null,
+        lastResult: null
+      };
+    }
+    return state.wordStats[wordId];
+  }
+
+  function calculateSmoothedAccuracy(correct, attempts, prior = 0.5, weight = 4) {
+    return (correct + prior * weight) / Math.max(1, attempts + weight);
+  }
+
+  function computeWordMastery(entry) {
+    const attempts = (entry.correct || 0) + (entry.wrong || 0);
+    if (!attempts) {
+      return 0;
+    }
+
+    const accuracy = (entry.correct || 0) / attempts;
+    const reliability = clamp(attempts / 4, 0, 1);
+    const lastResultFactor = entry.lastResult === "correct" ? 1 : 0.7;
+    const streakFactor = clamp((entry.bestStreak || 0) / 3, 0, 1);
+
+    return clamp(reliability * (accuracy * 0.62 + lastResultFactor * 0.23 + streakFactor * 0.15), 0, 1);
+  }
+
+  function recordPerformance(word, isCorrect, responseMs) {
+    const now = Date.now();
+    const entry = getWordStatsEntry(word.id);
+    entry.seen += 1;
+    entry.lastSeenAt = now;
+    entry.lastResult = isCorrect ? "correct" : "wrong";
+
+    if (isCorrect) {
+      entry.correct += 1;
+      entry.currentStreak += 1;
+      entry.bestStreak = Math.max(entry.bestStreak, entry.currentStreak);
+      entry.lastCorrectAt = now;
+      state.totalCorrectEver += 1;
+    } else {
+      entry.wrong += 1;
+      entry.currentStreak = 0;
+      state.totalWrongEver += 1;
+    }
+
+    const shortestAnswerLength = Math.max(
+      1,
+      ...word.answers.map((answer) => normalizeText(answer).replace(/\s/g, "").length).filter((value) => value > 0)
+    );
+
+    state.recentResults.unshift({
+      id: word.id,
+      correct: isCorrect,
+      timestamp: now,
+      responseMs: Number.isFinite(responseMs) ? clamp(Math.round(responseMs), 0, 90000) : null,
+      answerLength: shortestAnswerLength,
+      cefr: word.cefr || "A1"
+    });
+    state.recentResults = state.recentResults.slice(0, MAX_RECENT_RESULTS);
+  }
+
+  function getStageAttemptDetails(stageLabel) {
+    const stageWords = WORDS_BY_STAGE[stageLabel] || [];
+    const stageLevels = LEVELS_BY_STAGE[stageLabel] || [];
+    const masteredSet = new Set(state.masteredWordIds);
+    const legacyMasteredCount = stageWords.filter((word) => masteredSet.has(word.id)).length;
+    const wordEntries = stageWords
+      .map((word) => ({ word, stats: state.wordStats[word.id] || null }))
+      .filter((entry) => entry.stats && entry.stats.seen > 0);
+
+    const attempts = wordEntries.reduce((sum, entry) => sum + entry.stats.correct + entry.stats.wrong, 0);
+    const correct = wordEntries.reduce((sum, entry) => sum + entry.stats.correct, 0);
+    const rawDistinctAttempted = wordEntries.length;
+    const rawDistinctCorrect = wordEntries.filter((entry) => entry.stats.correct > 0).length;
+    const distinctAttempted = Math.max(rawDistinctAttempted, Math.round(legacyMasteredCount * 0.7));
+    const distinctCorrect = Math.max(rawDistinctCorrect, Math.round(legacyMasteredCount * 0.85));
+    const stableWords = wordEntries.filter((entry) => {
+      const localAttempts = entry.stats.correct + entry.stats.wrong;
+      if (localAttempts < 2) {
+        return false;
+      }
+      return (entry.stats.correct / localAttempts) >= 0.68 && entry.stats.lastResult === "correct";
+    }).length;
+    const averageMastery = wordEntries.length
+      ? wordEntries.reduce((sum, entry) => sum + computeWordMastery(entry.stats), 0) / wordEntries.length
+      : clamp((legacyMasteredCount / Math.max(10, Math.round(stageWords.length * 0.1))) * 0.55, 0, 0.55);
+
+    const recentResults = state.recentResults.filter((result) => getCoarseCefrLabel(result.cefr) === stageLabel).slice(0, 24);
+    const recentCorrect = recentResults.filter((result) => result.correct).length;
+    const smoothedAccuracy = calculateSmoothedAccuracy(correct, attempts, 0.52, 6);
+    const recentAccuracy = recentResults.length
+      ? calculateSmoothedAccuracy(recentCorrect, recentResults.length, 0.52, 4)
+      : smoothedAccuracy;
+
+    const coverageTarget = Math.max(12, Math.min(stageWords.length, Math.round(stageWords.length * 0.12)));
+    const stableTarget = Math.max(7, Math.round(coverageTarget * 0.55));
+    const correctTarget = Math.max(9, Math.round(coverageTarget * 0.75));
+    const completedLevels = stageLevels.filter((level) => state.completedLevels.includes(level.level)).length;
+
+    const timingSamples = recentResults.filter((result) => result.correct && Number.isFinite(result.responseMs) && Number.isFinite(result.answerLength));
+    const averageMsPerChar = timingSamples.length
+      ? timingSamples.reduce((sum, result) => sum + (result.responseMs / Math.max(4, result.answerLength)), 0) / timingSamples.length
+      : null;
+
+    const accuracyScore = clamp((smoothedAccuracy - 0.50) / 0.34, 0, 1);
+    const recentScore = clamp((recentAccuracy - 0.52) / 0.30, 0, 1);
+    const coverageScore = clamp(distinctAttempted / coverageTarget, 0, 1);
+    const stableScore = clamp(stableWords / stableTarget, 0, 1);
+    const breadthScore = clamp(distinctCorrect / correctTarget, 0, 1);
+    const completionScore = stageLevels.length ? clamp(completedLevels / stageLevels.length, 0, 1) : 0;
+    const speedScore = averageMsPerChar == null ? 0.55 : clamp((1100 - averageMsPerChar) / 650, 0, 1);
+
+    const confidence = clamp(
+      accuracyScore * 0.30 +
+      recentScore * 0.22 +
+      coverageScore * 0.17 +
+      averageMastery * 0.14 +
+      stableScore * 0.09 +
+      breadthScore * 0.05 +
+      completionScore * 0.03 +
+      speedScore * 0.03 -
+      Math.max(0, 0.18 - coverageScore) * 0.12,
+      0,
+      1
+    );
+
+    return {
+      stageLabel,
+      attempts,
+      correct,
+      recentResults,
+      smoothedAccuracy,
+      recentAccuracy,
+      distinctAttempted,
+      distinctCorrect,
+      stableWords,
+      averageMastery,
+      coverageScore,
+      stableScore,
+      breadthScore,
+      completionScore,
+      speedScore,
+      confidence
+    };
+  }
+
+  function getLevelEstimate() {
+    const totalAttempts = state.totalCorrectEver + state.totalWrongEver;
+    const stageDetails = STAGE_LABELS.map((stageLabel) => getStageAttemptDetails(stageLabel));
+
+    let estimatedStageIndex = 0;
+    let canAdvance = true;
+    stageDetails.forEach((detail, index) => {
+      if (!canAdvance) {
+        return;
+      }
+      const isReady = detail.confidence >= READINESS_THRESHOLDS[index]
+        && detail.coverageScore >= MIN_COVERAGE_THRESHOLDS[index];
+      if (isReady) {
+        estimatedStageIndex = index;
+      } else {
+        canAdvance = false;
+      }
+    });
+
+    const fillPercentage = clamp(
+      5 +
+      18 * stageDetails[0].confidence +
+      25 * stageDetails[1].confidence * Math.pow(stageDetails[0].confidence, 1.18) +
+      25 * stageDetails[2].confidence * Math.pow(Math.min(stageDetails[0].confidence, stageDetails[1].confidence), 1.22) +
+      27 * stageDetails[3].confidence * Math.pow(Math.min(stageDetails[1].confidence, stageDetails[2].confidence), 1.26),
+      5,
+      100
+    );
+
+    const currentLabel = STAGE_LABELS[estimatedStageIndex];
+    const nextLabel = estimatedStageIndex < STAGE_LABELS.length - 1 ? STAGE_LABELS[estimatedStageIndex + 1] : null;
+    const nextDetail = nextLabel ? stageDetails[estimatedStageIndex + 1] : null;
+
+    const recentGlobalResults = state.recentResults.slice(0, 40);
+    const recentGlobalAccuracy = recentGlobalResults.length
+      ? recentGlobalResults.filter((result) => result.correct).length / recentGlobalResults.length
+      : (totalAttempts ? state.totalCorrectEver / totalAttempts : 0);
+    const smoothedGlobalAccuracy = calculateSmoothedAccuracy(state.totalCorrectEver, totalAttempts, 0.52, 8);
+    const accuracyMetric = Math.round(clamp(smoothedGlobalAccuracy * 0.65 + recentGlobalAccuracy * 0.35, 0, 1) * 100);
+
+    const currentDailyStreak = getCurrentStreak();
+    const consistencyMetric = Math.round(
+      clamp((state.bestComboEver / 20) * 0.72 + (currentDailyStreak / 7) * 0.28, 0, 1) * 100
+    );
+
+    const recentCorrects = state.recentResults.filter((result) => result.correct).slice(0, 40);
+    const difficultyMetric = recentCorrects.length
+      ? Math.round(
+        clamp(
+          (recentCorrects.reduce((sum, result) => sum + getDifficultyValue(result.cefr), 0) / recentCorrects.length - 0.85) / 2,
+          0,
+          1
+        ) * 100
+      )
+      : Math.round(clamp(fillPercentage / 100 * 0.65, 0, 1) * 100);
+
+    let trendText = "Erste Schätzung";
+    let description = "Die Schätzung kombiniert Trefferquote, aktuelle Form, Wortbreite, Wiederholungsstabilität und Schwierigkeit.";
+
+    if (totalAttempts < 8) {
+      trendText = "Erste Schätzung – mit mehr Antworten wird sie deutlich genauer.";
+      description = "Sobald du mehr Wörter beantwortest, reagiert der Balken feiner auf deine tatsächliche Leistung.";
+    } else if (!nextLabel) {
+      trendText = stageDetails[3].confidence >= 0.72
+        ? "Stabile B2-Tendenz – sehr stark."
+        : "B2 erreicht – jetzt weiter absichern.";
+      description = "Du triffst schon viele schwierige Wörter. Halte jetzt vor allem Konstanz und Wiederholungsstabilität hoch.";
+    } else if (nextDetail) {
+      if (nextDetail.coverageScore < 0.45) {
+        trendText = `Tendenz Richtung ${nextLabel}.`;
+        description = `Für ${nextLabel} helfen dir vor allem mehr unterschiedliche ${nextLabel}-Wörter und mehr Breite in diesem Bereich.`;
+      } else if (nextDetail.recentAccuracy < 0.68) {
+        trendText = `${currentLabel} stabil – ${nextLabel} baut sich auf.`;
+        description = `Für ${nextLabel} zählt jetzt vor allem eine bessere aktuelle Trefferquote auf schwierigeren Wörtern.`;
+      } else {
+        trendText = `Gute Tendenz Richtung ${nextLabel}.`;
+        description = `Du bist nah an ${nextLabel}. Noch ein paar stabile Wiederholungen und saubere Serien auf diesem Niveau.`;
+      }
+    }
+
+    return {
+      currentLabel,
+      fillPercentage,
+      scoreLabel: `${Math.round(fillPercentage)}%`,
+      trendText,
+      description,
+      accuracyMetric,
+      consistencyMetric,
+      difficultyMetric
+    };
+  }
+
+  function renderLevelEstimator() {
+    const estimate = getLevelEstimate();
+    dom.cefrCurrentLabel.textContent = estimate.currentLabel;
+    dom.cefrScoreValue.textContent = estimate.scoreLabel;
+    dom.cefrTrendText.textContent = estimate.trendText;
+    dom.cefrMeterFill.style.width = `${estimate.fillPercentage}%`;
+    dom.cefrDescription.textContent = estimate.description;
+    dom.levelMetricAccuracy.textContent = `${estimate.accuracyMetric}%`;
+    dom.levelMetricConsistency.textContent = `${estimate.consistencyMetric}%`;
+    dom.levelMetricDifficulty.textContent = `${estimate.difficultyMetric}%`;
+  }
+
+  function renderDashboard() {
     renderTopStats();
+    renderLevelEstimator();
+  }
+
+  function renderMenu() {
+    renderDashboard();
     renderAchievementShelf();
     renderLevelGrid();
     renderThemeGrid();
@@ -363,32 +730,19 @@
 
   function renderAchievementShelf() {
     const todayCount = getTodayCount();
-    const badges = [
-      {
-        unlocked: state.bestComboEver >= 5,
-        icon: "⭐",
-        title: "5er-Serie",
-        text: "5 richtige Antworten am Stück"
-      },
-      {
-        unlocked: state.bestComboEver >= 10,
-        icon: "⭐⭐",
-        title: "10er-Serie",
-        text: "10 richtige Antworten am Stück"
-      },
-      {
-        unlocked: state.bestComboEver >= 20,
-        icon: "⭐⭐⭐",
-        title: "20er-Serie",
-        text: "20 richtige Antworten am Stück"
-      },
-      {
-        unlocked: todayCount >= DAILY_GOAL,
-        icon: "🏆",
-        title: "Tagespokal",
-        text: "10 richtige Antworten an einem Tag"
-      }
-    ];
+    const badges = MILESTONES.map((milestone, index) => ({
+      unlocked: state.bestComboEver >= milestone,
+      icon: index === 0 ? "⭐" : index === 1 ? "⭐⭐" : "⭐⭐⭐",
+      title: `${milestone}er-Serie`,
+      text: `${milestone} richtige Antworten am Stück`
+    }));
+
+    badges.push({
+      unlocked: todayCount >= DAILY_GOAL,
+      icon: "🏆",
+      title: "Tagespokal",
+      text: "10 richtige Antworten an einem Tag"
+    });
 
     dom.achievementShelf.innerHTML = badges.map((badge) => `
       <article class="achievement-badge ${badge.unlocked ? "unlocked" : ""}">
@@ -506,10 +860,10 @@
       wrong: 0,
       combo: 0,
       bestCombo: 0,
-      unlockedMilestones: [],
       awaitingNext: false,
       pendingCompletion: false,
-      nextExcludeId: null
+      nextExcludeId: null,
+      questionShownAt: null
     };
 
     if (savedProgress) {
@@ -537,6 +891,8 @@
 
     if (!session.currentWordId || !session.remainingIds.includes(session.currentWordId)) {
       pickNextWord();
+    } else {
+      stampQuestionShown();
     }
 
     syncModeProgressWithSession();
@@ -579,17 +935,13 @@
     }
 
     const todayCount = getTodayCount();
-    const badges = [
-      { milestone: 5, icon: "⭐", title: "5er-Serie" },
-      { milestone: 10, icon: "⭐⭐", title: "10er-Serie" },
-      { milestone: 20, icon: "⭐⭐⭐", title: "20er-Serie" }
-    ].map((badge) => {
-      const unlocked = session.bestCombo >= badge.milestone || state.bestComboEver >= badge.milestone;
+    const badges = MILESTONES.map((milestone, index) => {
+      const unlocked = session.bestCombo >= milestone || state.bestComboEver >= milestone;
       return {
         unlocked,
-        icon: badge.icon,
-        title: badge.title,
-        text: `${badge.milestone} richtige Antworten in Folge`
+        icon: index === 0 ? "⭐" : index === 1 ? "⭐⭐" : "⭐⭐⭐",
+        title: `${milestone}er-Serie`,
+        text: `${milestone} richtige Antworten in Folge`
       };
     });
 
@@ -642,6 +994,7 @@
 
     const nextId = getNextWordIdFromPool(session.remainingIds, excludeId);
     session.currentWordId = nextId;
+    stampQuestionShown();
   }
 
   function handleAnswerSubmit(event) {
@@ -665,21 +1018,23 @@
       return;
     }
 
+    const responseMs = Number.isFinite(session.questionShownAt) ? Date.now() - session.questionShownAt : null;
     const isCorrect = word.answers.some((answer) => normalizeText(answer) === normalizedInput);
 
     if (isCorrect) {
-      onCorrectAnswer(word);
+      onCorrectAnswer(word, responseMs);
     } else {
-      onWrongAnswer(word);
+      onWrongAnswer(word, responseMs);
     }
   }
 
-  function onCorrectAnswer(word) {
+  function onCorrectAnswer(word, responseMs) {
     session.correct += 1;
     session.combo += 1;
     session.bestCombo = Math.max(session.bestCombo, session.combo);
     state.bestComboEver = Math.max(state.bestComboEver, session.bestCombo);
-    state.totalCorrectEver += 1;
+
+    recordPerformance(word, true, responseMs);
 
     if (!state.masteredWordIds.includes(word.id)) {
       state.masteredWordIds.push(word.id);
@@ -706,16 +1061,18 @@
     renderSession();
   }
 
-  function onWrongAnswer(word) {
+  function onWrongAnswer(word, responseMs) {
     session.wrong += 1;
     session.combo = 0;
-    state.totalWrongEver += 1;
+
+    recordPerformance(word, false, responseMs);
 
     const answers = word.answers.map((answer) => escapeHtml(answer)).join(" · ");
     showFeedback(false, `Nicht ganz. Richtig ist: <strong>${answers}</strong>`);
     prepareAdvance(word.id, false);
     syncModeProgressWithSession();
     saveState();
+    renderDashboard();
     renderSession();
   }
 

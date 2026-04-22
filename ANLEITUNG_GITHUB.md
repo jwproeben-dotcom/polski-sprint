@@ -71,8 +71,3 @@ Wenn dein GitHub-Name `maxmustermann` ist, dann ist die Adresse:
 
 Der Lernfortschritt wird im Browser gespeichert (Local Storage).  
 Wenn du den Browser wechselst oder die Browserdaten löschst, ist der Fortschritt dort weg.
-
-
-## Zusatz zum letzten Update
-
-Auf dem Handy bleibt die Eingabe jetzt auch zwischen zwei Fragen aktiv. Nach dem Hochladen der neuen Dateien solltest du beim naechsten Wort direkt weiterschreiben koennen, ohne wieder in das Eingabefeld tippen zu muessen.
